@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MINI GAME OJI STORE</title>
+  <style>
+    body { 
+      background: #001f3f; color: #fff; display: flex; flex-direction: column; align-items: center; margin: 0;
+      font-family: sans-serif;
+    }
+    h1 { margin-top: 20px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
+    #game-container { position: relative; margin-top: 20px; display: none; }
+    canvas { background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.3); }
+    #controls, #restart, #score { display: none; }
+    #controls { display: flex; justify-content: center; margin-top: 10px; }
+    .btn { background: rgba(255,255,255,0.1); border: none; color: #fff; font-size: 1.2em; padding: 10px 15px; margin: 5px; border-radius: 5px; cursor: pointer; }
+    .btn:hover { background: rgba(255,255,255,0.2); }
+    #play { margin: 30px; }
+    #level-select { display: none; flex-direction: column; align-items: center; }
+    #level-select .level { width: 120px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>MINI GAME OJI STORE</h1>
+  <button class="btn" id="play">Play</button>
+  <div id="level-select">
+    <button class="btn level" data-level="easy">Easy</button>
+    <button class="btn level" data-level="hard">Hard</button>
+    <button class="btn level" data-level="insane">Insane</button>
+  </div>
+  <div id="game-container">
+    <canvas id="game" width="320" height="320"></canvas>
+  </div>
+  <div id="score">Score: 0</div>
+  <div id="controls">
+    <button class="btn" id="left">&#8592;</button>
+    <button class="btn" id="down">&#8595;</button>
+    <button class="btn" id="right">&#8594;</button>
+    <button class="btn" id="rotate">&#10227;</button>
+  </div>
+  <button class="btn" id="restart">Restart</button>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playClick() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 440;
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+
+    const playBtn = document.getElementById('play');
+    const levelSelect = document.getElementById('level-select');
+    const gameContainer = document.getElementById('game-container');
+    const scoreEl = document.getElementById('score');
+    const controls = document.getElementById('controls');
+    const restartBtn = document.getElementById('restart');
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const ROWS = 8, COLS = 8, BLOCK = 40;
+    let grid, player, dropCounter, dropInterval, lastTime;
+    let difficulty;
+
+    const SHAPES = [
+      [],[[1]],[[1,1]],[[1,1,1]],[[1,1,1,1]],[[1,1],[1,1]],
+      [[1,0],[1,0],[1,1]],[[0,1],[0,1],[1,1]],
+      [[1,1,1],[0,1,0]],[[1,1,0],[0,1,1]],[[0,1,1],[1,1,0]]
+    ];
+    const COLORS = ['#000','#FF4136','#FF851B','#FFDC00','#2ECC40','#0074D9','#B10DC9','#39CCCC','#F012BE','#FF69B4','#7FDBFF'];
+
+    function initGame() {
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      grid = createMatrix(ROWS, COLS);
+      player = {pos:{x:0,y:0},matrix:null,color:1,score:0};
+      dropCounter = 0;
+      lastTime = 0;
+      playerReset();
+      updateScore();
+      update();
+    }
+
+    playBtn.addEventListener('click', () => {
+      playClick();
+      playBtn.style.display = 'none';
+      levelSelect.style.display = 'flex';
+    });
+
+    document.querySelectorAll('.level').forEach(btn => {
+      btn.addEventListener('click', () => {
+        playClick();
+        difficulty = btn.dataset.level;
+        dropInterval = difficulty==='easy'?1000:difficulty==='hard'?600:300;
+        levelSelect.style.display = 'none';
+        gameContainer.style.display = 'block';
+        scoreEl.style.display = 'block';
+        controls.style.display = 'flex';
+        restartBtn.style.display = 'inline-block';
+        initGame();
+      });
+    });
+
+    restartBtn.addEventListener('click', () => {
+      playClick();
+      location.reload();
+    });
+
+    function createMatrix(r,c){const m=[];for(let i=0;i<r;i++)m.push(new Array(c).fill(0));return m;}
+    function rotate(m){const t=m[0].map((_,i)=>m.map(r=>r[i]));return t.reverse();}
+    function collide(a,p){for(let y=0;y<p.matrix.length;y++)for(let x=0;x<p.matrix[y].length;x++)if(p.matrix[y][x]&& (a[y+p.pos.y]&&a[y+p.pos.y][x+p.pos.x])!==0)return true;return false;}
+    function merge(a,p){p.matrix.forEach((r,y)=>r.forEach((v,x)=>v&&(a[y+p.pos.y][x+p.pos.x]=p.color)));}
+    function sweep(){outer:for(let y=ROWS-1;y>=0;--y){for(let x=0;x<COLS;x++)if(!grid[y][x])continue outer;const row=grid.splice(y,1)[0].fill(0);grid.unshift(row);player.score+=5;updateScore();y++;}}
+    function drawMatrix(m,o){m.forEach((r,y)=>r.forEach((v,x)=>{if(v){ctx.fillStyle=COLORS[v];ctx.fillRect((x+o.x)*BLOCK,(y+o.y)*BLOCK,BLOCK-1,BLOCK-1);}}));}
+    function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);drawMatrix(grid,{x:0,y:0});drawMatrix(player.matrix,player.pos);}
+    function drop(){player.pos.y++;if(collide(grid,player)){player.pos.y--;merge(grid,player);playerReset();sweep();}dropCounter=0;}
+    function playerReset(){const id=Math.floor(Math.random()*(SHAPES.length-1))+1;player.matrix=SHAPES[id];player.color=Math.floor(Math.random()*(COLORS.length-1))+1;player.pos.y=0;player.pos.x=Math.floor((COLS-player.matrix[0].length)/2);if(collide(grid,player))gameOver();}
+    function update(t=0){const d=t-lastTime;lastTime=t;dropCounter+=d;if(dropCounter>dropInterval)drop();draw();requestAnimationFrame(update);}
+    function updateScore(){scoreEl.innerText='Score: '+player.score;}
+    
+    // PERUBAHAN DIMULAI DI SINI
+    function gameOver(){
+      alert('Game Over!');
+      gameContainer.style.display = 'none';
+      controls.style.display = 'none';
+      scoreEl.style.display = 'none';
+      restartBtn.style.display = 'none';
+      playBtn.style.display = 'inline-block';
+      levelSelect.style.display = 'none';
+      player.matrix = null;
+    }
+    // PERUBAHAN BERAKHIR DI SINI
+
+    document.addEventListener('keydown',e=>{
+      if(!player.matrix) return;
+      if(e.key==='ArrowLeft'){player.pos.x--;if(collide(grid,player))player.pos.x++;playClick();}
+      if(e.key==='ArrowRight'){player.pos.x++;if(collide(grid,player))player.pos.x--;playClick();}
+      if(e.key==='ArrowDown'){drop();playClick();}
+      if(e.key==='ArrowUp'){player.matrix=rotate(player.matrix);if(collide(grid,player))player.matrix=rotate(rotate(rotate(player.matrix)));playClick();}
+    });
+
+    ['left','right','down','rotate'].forEach(id=>{
+      document.getElementById(id).addEventListener('click',()=>{
+        if(!player.matrix) return;
+        if(id==='down') drop();
+        else if(id==='rotate'){player.matrix=rotate(player.matrix);if(collide(grid,player))player.matrix=rotate(rotate(rotate(player.matrix)));}
+        else {const dir=id==='left'? -1:1;player.pos.x+=dir;if(collide(grid,player))player.pos.x-=dir;}
+        playClick();
+      })
+    });
+  </script>
+</body>
+</html>
